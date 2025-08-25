@@ -2,9 +2,16 @@ import { createServerClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
+  console.log("[v0] POST /api/usage - Request received")
+  console.log("[v0] Request method:", request.method)
+  console.log("[v0] Request headers:", Object.fromEntries(request.headers.entries()))
+
   try {
     const authHeader = request.headers.get("authorization")
+    console.log("[v0] Authorization header:", authHeader)
+
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("[v0] Missing or invalid auth header")
       return NextResponse.json(
         { error: "Missing or invalid authorization header. Use: Authorization: Bearer <api_key>" },
         { status: 401 },
@@ -12,8 +19,11 @@ export async function POST(request: NextRequest) {
     }
 
     const apiKey = authHeader.substring(7) // Remove 'Bearer ' prefix
+    console.log("[v0] Extracted API key:", apiKey.substring(0, 8) + "...")
 
     const body = await request.json()
+    console.log("[v0] Request body:", body)
+
     const { event_type, tokens_used, cost_usd, metadata } = body
 
     // Validate required fields
@@ -82,15 +92,20 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("Usage API error:", error)
+    console.error("[v0] Usage API error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 export async function GET(request: NextRequest) {
+  console.log("[v0] GET /api/usage - Request received")
+
   try {
     const authHeader = request.headers.get("authorization")
+    console.log("[v0] Authorization header:", authHeader)
+
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("[v0] Missing or invalid auth header")
       return NextResponse.json(
         { error: "Missing or invalid authorization header. Use: Authorization: Bearer <api_key>" },
         { status: 401 },
@@ -98,6 +113,8 @@ export async function GET(request: NextRequest) {
     }
 
     const apiKey = authHeader.substring(7)
+    console.log("[v0] Extracted API key:", apiKey.substring(0, 8) + "...")
+
     const supabase = createServerClient()
 
     const { data: keyData, error: keyError } = await supabase
@@ -145,7 +162,7 @@ export async function GET(request: NextRequest) {
       recent_usage: usageStats || [],
     })
   } catch (error) {
-    console.error("Usage API GET error:", error)
+    console.error("[v0] Usage API GET error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
