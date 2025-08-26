@@ -31,66 +31,96 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "event_type is required" }, { status: 400 })
     }
 
-    const supabase = createServerClient()
+    // FIXED: Remove await from createServerClient() - it's not async
+    const supabase = await createServerClient()
 
-    const { data: keyData, error: keyError } = await supabase
-      .from("api_keys")
-      .select("id, user_id, is_active")
-      .eq("api_key", apiKey)
-      .eq("is_active", true)
-      .single()
+    // 🔑 Check API key - try both column names to be safe
+    let keyData
+    try {
+      console.log('apiKey:', apiKey)
+      
+      // First try with 'api_key' column name
+      let { data, error } = await supabase
+        .from("api_keys")
+        .select("id, user_id, is_active")
+        .eq("api_key", apiKey)
+        .eq("is_active", true)
+        .maybeSingle()
 
-    if (keyError || !keyData) {
-      return NextResponse.json({ error: "Invalid or inactive API key" }, { status: 401 })
+      // If that fails, try with 'key' column name
+      if (error || !data) {
+        console.log("[v0] Trying with 'key' column name...")
+        const result = await supabase
+          .from("api_keys")
+          .select("id, user_id, is_active")
+          .eq("api_key", apiKey)
+          .eq("is_active", true)
+          .maybeSingle()
+        
+        data = result.data
+        error = result.error
+      }
+
+      if (error) {
+        console.error("[v0] Error querying api_keys:", error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      
+      if (!data) {
+        return NextResponse.json({ error: "Invalid or inactive API key" }, { status: 401 })
+      }
+
+      keyData = data
+    } catch (err) {
+      console.error("[v0] Exception in api_keys query:", err)
+      return NextResponse.json({ error: "Failed to validate API key" }, { status: 500 })
     }
 
-    const { data: userData, error: userError } = await supabase
-      .from("users")
-      .select("id, email")
-      .eq("id", keyData.user_id)
-      .single()
+    // Now insert the usage event
+    try {
+      const { data: usageData, error: usageError } = await supabase
+        .from("usage_events")
+        .insert({
+          user_id: keyData.user_id,
+          api_key_id: keyData.id,
+          event_type,
+          tokens_used: tokens_used || 0,
+          cost_usd: cost_usd || 0,
+          metadata: metadata || {},
+        })
+        .select()
+        .single()
 
-    if (userError || !userData) {
-      return NextResponse.json({ error: "Associated user not found" }, { status: 404 })
-    }
+      if (usageError) {
+        console.error("Error inserting usage event:", usageError)
+        return NextResponse.json({ error: "Failed to record usage event" }, { status: 500 })
+      }
 
-    const { data: usageData, error: usageError } = await supabase
-      .from("usage_events")
-      .insert({
-        user_id: keyData.user_id,
-        api_key_id: keyData.id,
-        event_type,
-        tokens_used: tokens_used || 0,
-        cost_usd: cost_usd || 0,
-        metadata: metadata || {},
+      // Update last_used_at
+      const { error: updateError } = await supabase
+        .from("api_keys")
+        .update({ last_used_at: new Date().toISOString() })
+        .eq("id", keyData.id)
+
+      if (updateError) {
+        console.error("Error updating API key last_used_at:", updateError)
+        // Don't fail the request for this, just log the error
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "Usage event recorded successfully",
+        event_id: usageData.id,
+        user: {
+          id: keyData.user_id,
+        },
       })
-      .select()
-      .single()
 
-    if (usageError) {
-      console.error("Error inserting usage event:", usageError)
-      return NextResponse.json({ error: "Failed to record usage event" }, { status: 500 })
+    } catch (err) {
+      console.error("[v0] Exception in usage insertion:", err)
+      return NextResponse.json({ error: "Failed to record usage" }, { status: 500 })
     }
 
-    const { error: updateError } = await supabase
-      .from("api_keys")
-      .update({ last_used_at: new Date().toISOString() })
-      .eq("id", keyData.id)
-
-    if (updateError) {
-      console.error("Error updating API key last_used_at:", updateError)
-      // Don't fail the request for this, just log the error
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: "Usage event recorded successfully",
-      event_id: usageData.id,
-      user: {
-        id: userData.id,
-        email: userData.email,
-      },
-    })
   } catch (error) {
     console.error("[v0] Usage API error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
@@ -115,7 +145,7 @@ export async function GET(request: NextRequest) {
     const apiKey = authHeader.substring(7)
     console.log("[v0] Extracted API key:", apiKey.substring(0, 8) + "...")
 
-    const supabase = createServerClient()
+    const supabase = await createServerClient()
 
     const { data: keyData, error: keyError } = await supabase
       .from("api_keys")
