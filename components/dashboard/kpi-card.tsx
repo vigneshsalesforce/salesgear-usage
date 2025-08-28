@@ -12,6 +12,10 @@ interface KpiCardProps {
 }
 
 export function KpiCard({ title, value, delta, icon }: KpiCardProps) {
+   const displayValue =
+    title === "Total Tokens"
+      ? `${value}/10000`
+      : value
   return (
     <Card className="rounded-2xl shadow-sm">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -19,7 +23,7 @@ export function KpiCard({ title, value, delta, icon }: KpiCardProps) {
         {icon && <div className="text-slate-400">{icon}</div>}
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold text-slate-900">{value}</div>
+        <div className="text-2xl font-bold text-slate-900">{displayValue}</div>
         {delta && (
           <p className={`text-xs ${delta.isPositive ? "text-green-600" : "text-red-600"}`}>
             {delta.isPositive ? "+" : ""}

@@ -1,5 +1,14 @@
 import { createServerClient } from "@/lib/supabase/server"
 import { type NextRequest, NextResponse } from "next/server"
+import { estimateAgentCost } from "@/lib/pricing";
+
+function detectProvider(modelVersion: string): string {
+  if (!modelVersion) return "unknown";
+  if (modelVersion.startsWith("gemini")) return "google";
+  if (modelVersion.startsWith("gpt")) return "openai";
+  if (modelVersion.startsWith("claude")) return "anthropic";
+  return "other";
+}
 
 export async function POST(request: NextRequest) {
   console.log("[v0] POST /api/usage - Request received")
@@ -24,8 +33,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     console.log("[v0] Request body:", body)
 
-    const { event_type, tokens_used, cost_usd, metadata } = body
-
+    const agentName = body.agentName ?? body.metadata?.agentName ?? "Other";
+    const modelVersion = body.modelVersion ?? body.metadata?.modelVersion ?? "";
+    const event_type = body.event_type ?? "chat_message";
+    const { agentType, cost_usd } = estimateAgentCost(agentName);
+    const tokens_used = body.metadata?.payload?.totalTokenCount ?? 0;
+    const prompt_tokens = body.metadata?.payload?.promptTokenCount ?? 0;
+    const completion_tokens = body.metadata?.payload?.candidatesTokenCount ?? 0;
+    
     // Validate required fields
     if (!event_type) {
       return NextResponse.json({ error: "event_type is required" }, { status: 400 })
@@ -78,18 +93,24 @@ export async function POST(request: NextRequest) {
 
     // Now insert the usage event
     try {
-      const { data: usageData, error: usageError } = await supabase
-        .from("usage_events")
-        .insert({
-          user_id: keyData.user_id,
-          api_key_id: keyData.id,
-          event_type,
-          tokens_used: tokens_used || 0,
-          cost_usd: cost_usd || 0,
-          metadata: metadata || {},
-        })
-        .select()
-        .single()
+          const { data: usageData, error: usageError } = await supabase
+      .from("usage_events")
+      .insert({
+        user_id: keyData.user_id,                // ensure user_id passed from Nextgen
+        api_key_id: keyData.id,          // ensure api_key_id passed
+        event_type,
+        tokens_used,
+        cost_usd,
+        agent_name: agentType,
+        model_version: modelVersion,
+        provider: detectProvider(modelVersion),
+        prompt_tokens,
+        completion_tokens,
+        conversation_id: body.conversationId ?? null,
+        metadata: body.metadata ?? {}
+      })
+      .select()
+      .single();
 
       if (usageError) {
         console.error("Error inserting usage event:", usageError)
